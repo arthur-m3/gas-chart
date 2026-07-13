@@ -112,7 +112,7 @@ def render(df: pd.DataFrame, output_path: Path, as_of: str) -> None:
 
     # Legend: line + band.
     legend_handles = [
-        plt.Line2D([0], [0], color=NAVY, linewidth=2.0, label="Forward Rate"),
+        plt.Line2D([0], [0], color=NAVY, linewidth=2.0, label="Current Rate"),
         Patch(facecolor=BAND, alpha=0.5, label="3-Year Trading Range"),
     ]
     ax.legend(
