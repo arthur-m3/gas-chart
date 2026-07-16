@@ -22,6 +22,8 @@ Exits nonzero with a clear message on any failure so the CI job fails visibly.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import sys
 import time
@@ -67,6 +69,17 @@ def get_token(tenant: str, client_id: str, secret: str) -> str:
     return result["access_token"]
 
 
+def token_roles(token: str) -> list[str]:
+    """Decode the JWT payload (unverified) to read granted app roles."""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        return claims.get("roles", [])
+    except Exception:
+        return []
+
+
 def graph_request(method: str, url: str, token: str, **kwargs) -> requests.Response:
     """Graph call with retry/backoff on 429 and 5xx."""
     headers = kwargs.pop("headers", {})
@@ -100,6 +113,18 @@ def graph_request(method: str, url: str, token: str, **kwargs) -> requests.Respo
 def resolve_site_id(token: str, hostname: str, site_path: str) -> str:
     site_path = "/" + site_path.strip("/")
     resp = graph_request("GET", f"{GRAPH}/sites/{hostname}:{site_path}", token)
+    if resp.status_code in (401, 403):
+        raise UploadError(
+            f"access denied resolving site {hostname}:{site_path} "
+            f"({resp.status_code}: {resp.text[:200]}).\n"
+            "  Likely causes:\n"
+            "   - the app's Graph application permission was not admin-consented, or\n"
+            "   - with Sites.Selected, the app was not granted access to THIS site.\n"
+            "  Grant write access to the site, e.g. (PnP PowerShell):\n"
+            "   Grant-PnPAzureADAppSitePermission -AppId <client-id> "
+            "-DisplayName gas-chart \\\n"
+            f"     -Site https://{hostname}{site_path} -Permissions Write"
+        )
     if resp.status_code != 200:
         raise UploadError(
             f"could not resolve site {hostname}:{site_path} "
@@ -219,6 +244,15 @@ def main() -> int:
 
         print("Authenticating to Microsoft Graph (app-only) ...")
         token = get_token(tenant, client_id, secret)
+        roles = token_roles(token)
+        print(f"  granted app roles: {', '.join(roles) if roles else '(none)'}")
+        if not any(r.startswith("Sites.") for r in roles):
+            print(
+                "  [warn] token carries no Sites.* application role — the app "
+                "registration is likely missing an admin-consented Graph "
+                "application permission (Sites.Selected or Sites.ReadWrite.All)",
+                file=sys.stderr,
+            )
 
         site_id = resolve_site_id(token, hostname, site_path)
         drive_id = resolve_drive_id(token, site_id, drive_name)
