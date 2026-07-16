@@ -2,3 +2,5 @@ yfinance==1.2.0
 pandas==2.3.3
 matplotlib==3.9.4
 pillow==11.3.0
+msal==1.37.0
+requests==2.32.5

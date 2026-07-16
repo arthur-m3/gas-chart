@@ -12,6 +12,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Exposed at job level so the SharePoint step's `if` guard can read it.
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,3 +44,16 @@ jobs:
             git commit -m "chore: update gas forward-curve chart ($(date -u +%Y-%m-%d))"
             git push
           fi
+
+      # Mirrors outputs/ into SharePoint. Skipped until the Azure secrets are
+      # configured; once they are, any failure fails the job (and emails you).
+      - name: Mirror outputs to SharePoint
+        if: ${{ env.AZURE_CLIENT_ID != '' }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SHAREPOINT_HOSTNAME: ${{ vars.SHAREPOINT_HOSTNAME }}
+          SHAREPOINT_SITE_PATH: ${{ vars.SHAREPOINT_SITE_PATH }}
+          SHAREPOINT_DRIVE: ${{ vars.SHAREPOINT_DRIVE }}
+          SHAREPOINT_FOLDER: ${{ vars.SHAREPOINT_FOLDER }}
+        run: python upload_sharepoint.py

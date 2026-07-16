@@ -56,6 +56,67 @@ The CSV must have the four columns listed above. If a `metadata.json` sits
 next to the input CSV, its `generated_at` drives the "As of" caption;
 otherwise today's date is used.
 
+## SharePoint mirror (optional)
+
+After each run the workflow can mirror `outputs/` into a SharePoint document
+library so team members can grab the chart and data without touching GitHub.
+It uploads via the Microsoft Graph API using app-only (client-credentials)
+auth, so it runs unattended. The step is **skipped** until the Azure secrets
+below are set; once they are, any upload failure fails the job.
+
+### One-time setup
+
+1. **Register an app** in Entra ID (Azure AD) → *App registrations* → *New
+   registration*. Note the **Directory (tenant) ID** and **Application
+   (client) ID**.
+2. **Add a client secret** under *Certificates & secrets* → *New client
+   secret*. Copy the secret **value**.
+3. **Grant Graph permission** under *API permissions* → *Add a permission* →
+   *Microsoft Graph* → *Application permissions*:
+   - `Sites.Selected` (recommended — least privilege), then have an admin
+     grant this app write access to the specific site (e.g. via
+     [Graph `sites/{id}/permissions`](https://learn.microsoft.com/graph/api/site-post-permissions)
+     or PnP PowerShell `Grant-PnPAzureADAppSitePermission`), **or**
+   - `Sites.ReadWrite.All` (simpler, broader).
+   Then click **Grant admin consent**.
+
+### Configure the repo
+
+Add these under *Settings → Secrets and variables → Actions*.
+
+Secrets (sensitive):
+
+| Secret | Value |
+| --- | --- |
+| `AZURE_TENANT_ID` | Directory (tenant) ID |
+| `AZURE_CLIENT_ID` | Application (client) ID |
+| `AZURE_CLIENT_SECRET` | Client secret value |
+
+Variables (not sensitive):
+
+| Variable | Example | Notes |
+| --- | --- | --- |
+| `SHAREPOINT_HOSTNAME` | `contoso.sharepoint.com` | your tenant host |
+| `SHAREPOINT_SITE_PATH` | `/sites/EnergyTeam` | server-relative site path |
+| `SHAREPOINT_FOLDER` | `gas-chart` | target folder (created if missing) |
+| `SHAREPOINT_DRIVE` | `Documents` | *optional* library name; omit for the site default |
+
+For a site URL like `https://contoso.sharepoint.com/sites/EnergyTeam`, the
+hostname is `contoso.sharepoint.com` and the site path is `/sites/EnergyTeam`.
+
+### Test it
+
+Trigger a manual run (Actions → *Run workflow*), or run locally after
+exporting the same variables:
+
+```bash
+export AZURE_TENANT_ID=... AZURE_CLIENT_ID=... AZURE_CLIENT_SECRET=...
+export SHAREPOINT_HOSTNAME=contoso.sharepoint.com
+export SHAREPOINT_SITE_PATH=/sites/EnergyTeam
+export SHAREPOINT_FOLDER=gas-chart
+python upload_sharepoint.py
+```
+
 ## Data source
 
 NYMEX Henry Hub natural gas settlements, retrieved via Yahoo Finance
