@@ -30,22 +30,34 @@ BAND = "#B8CCE4"
 GRID_GRAY = "#D9D9D9"
 CAPTION_GRAY = "#808080"
 
+# Font sizes (points) — sized for a client-facing figure that stays readable
+# when embedded in a memo.
+FS_TICK = 14
+FS_AXIS_LABEL = 15
+FS_LEGEND = 14
+FS_CAPTION = 11
+
+# Only chart contracts within this many years of the as-of date. Further-dated
+# contracts stay in curve.csv but are omitted from the figure.
+CHART_YEARS = 3
+
 DEFAULT_INPUT = Path(__file__).resolve().parent / "outputs" / "curve.csv"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "outputs" / "gas_forward_chart.jpg"
 
 REQUIRED_COLUMNS = ["month", "forward_rate", "range_low", "range_high"]
 
 
-def resolve_as_of(input_path: Path) -> str:
-    """Return the 'as of' date string from a sibling metadata.json, if present."""
+def resolve_as_of(input_path: Path) -> pd.Timestamp:
+    """Return the 'as of' date (tz-naive) from a sibling metadata.json, if any."""
     meta_path = input_path.resolve().parent / "metadata.json"
     if meta_path.exists():
         try:
             generated_at = json.loads(meta_path.read_text())["generated_at"]
-            return pd.Timestamp(generated_at).strftime("%B %-d, %Y")
+            ts = pd.Timestamp(generated_at)
+            return ts.tz_localize(None) if ts.tzinfo else ts
         except (ValueError, KeyError):
             pass
-    return datetime.now(timezone.utc).strftime("%B %-d, %Y")
+    return pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
 
 
 def month_label(month: str) -> str:
@@ -64,7 +76,13 @@ def load_curve(input_path: Path) -> pd.DataFrame:
     return df.sort_values("month").reset_index(drop=True)
 
 
-def render(df: pd.DataFrame, output_path: Path, as_of: str) -> None:
+def render(df: pd.DataFrame, output_path: Path, as_of: pd.Timestamp) -> None:
+    # Limit the chart to contracts within CHART_YEARS of the as-of date;
+    # further-dated months remain in curve.csv but are not plotted.
+    months_ts = pd.to_datetime(df["month"] + "-01")
+    cutoff = (as_of + pd.DateOffset(years=CHART_YEARS)).normalize()
+    df = df[months_ts <= cutoff].reset_index(drop=True)
+
     x = range(len(df))
 
     fig, ax = plt.subplots(figsize=(13, 5.5))
@@ -85,7 +103,7 @@ def render(df: pd.DataFrame, output_path: Path, as_of: str) -> None:
     # Horizontal gridlines only.
     ax.grid(axis="y", color=GRID_GRAY, linewidth=0.8, zorder=0)
     ax.set_axisbelow(True)
-    ax.tick_params(axis="both", length=0, colors="#333333")
+    ax.tick_params(axis="both", length=0, colors="#333333", labelsize=FS_TICK)
 
     # No top/right spines; soften the remaining ones.
     for side in ("top", "right"):
@@ -99,15 +117,15 @@ def render(df: pd.DataFrame, output_path: Path, as_of: str) -> None:
     ax.set_ylim(int(lo), int(hi) + 1)
     ax.yaxis.set_major_locator(MultipleLocator(1))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:0.2f}"))
-    ax.set_ylabel("$/MMBtu", color="#333333")
+    ax.set_ylabel("$/MMBtu", color="#333333", fontsize=FS_AXIS_LABEL)
 
-    # X axis: vertical labels so we can fit them densely (every 2 months).
-    tick_positions = list(range(0, len(df), 2))
+    # X axis: ticks at January and July of each year only.
+    tick_positions = [
+        i for i, m in enumerate(df["month"])
+        if m.endswith("-01") or m.endswith("-07")
+    ]
     ax.set_xticks(tick_positions)
-    ax.set_xticklabels(
-        [month_label(df["month"].iloc[i]) for i in tick_positions],
-        rotation=90,
-    )
+    ax.set_xticklabels([month_label(df["month"].iloc[i]) for i in tick_positions])
     ax.set_xlim(0, len(df) - 1)
 
     # Legend: line + band.
@@ -117,14 +135,14 @@ def render(df: pd.DataFrame, output_path: Path, as_of: str) -> None:
     ]
     ax.legend(
         handles=legend_handles, loc="upper left",
-        frameon=False, fontsize=10,
+        frameon=False, fontsize=FS_LEGEND,
     )
 
     # Bottom-right caption.
     fig.text(
         0.995, 0.02,
-        f"As of {as_of}. Source: NYMEX settlements.",
-        ha="right", va="bottom", fontsize=8, color=CAPTION_GRAY,
+        f"As of {as_of:%B %-d, %Y}. Source: NYMEX settlements.",
+        ha="right", va="bottom", fontsize=FS_CAPTION, color=CAPTION_GRAY,
     )
 
     fig.tight_layout(rect=(0, 0.06, 1, 1))
